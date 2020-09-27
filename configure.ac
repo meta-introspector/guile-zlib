@@ -26,8 +26,9 @@ if test "$cross_compiling" != no; then
 fi
 
 PKG_CHECK_MODULES([LIBZ], [zlib])
+AC_MSG_CHECKING([libz library directory])
 PKG_CHECK_VAR([LIBZ_LIBDIR], [zlib], [libdir])
-AC_MSG_CHECKING([libz library path])
+AC_MSG_RESULT([$LIBZ_LIBDIR])
 AS_IF([test "x$LIBZ_LIBDIR" = "x"], [
   AC_MSG_FAILURE([Unable to identify libz lib path.])
 ])
