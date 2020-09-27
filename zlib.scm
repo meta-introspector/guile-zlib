@@ -32,7 +32,7 @@
 
 ;;; Commentary:
 ;;;
-;;; This file is extracted from Guix and originally writen by Ludovic Courtès.
+;;; This file is extracted from Guix and originally written by Ludovic Courtès.
 ;;; Bindings to the gzip-related part of zlib's API.  The main limitation of
 ;;; this API is that it requires a file descriptor as the source or sink.
 ;;;
