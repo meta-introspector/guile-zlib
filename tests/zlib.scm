@@ -73,4 +73,10 @@
                       (port-closed? parent)
                       (bytevector=? received data))))))))))))
 
+(test-assert "raw compress/decompress"
+  (let* ((data (random-bytevector (+ (random 10000) (* 20 1024))))
+         (cdata (compress data))
+         (ucdata (uncompress cdata)))
+    (equal? data ucdata)))
+
 (test-end)
