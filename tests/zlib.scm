@@ -1,5 +1,5 @@
 ;;; Guile-zlib --- Functional package management for GNU
-;;; Copyright © 2016, 2019 Ludovic Courtès <ludo@gnu.org>
+;;; Copyright © 2016, 2019, 2021 Ludovic Courtès <ludo@gnu.org>
 ;;;
 ;;; This file is part of Guile-zlib.
 ;;;
@@ -18,6 +18,7 @@
 
 (define-module (test-zlib)
   #:use-module (zlib)
+  #:use-module (srfi srfi-11)
   #:use-module (srfi srfi-64)
   #:use-module (rnrs bytevectors)
   #:use-module (rnrs io ports)
@@ -78,5 +79,28 @@
          (cdata (compress data))
          (ucdata (uncompress cdata)))
     (equal? data ucdata)))
+
+(define (test-zlib n level)
+  (test-assert (format #f "zlib ports [size: ~a, level: ~a]" n level)
+    (let* ((size (pk 'size (+ (random n %seed) n)))
+           (data (random-bytevector size)))
+      (let*-values (((port get)
+                     (open-bytevector-output-port))
+                    ((compressed)
+                     (make-zlib-output-port port #:level level)))
+        (put-bytevector compressed data)
+        (close-port compressed)
+        (let ((data2 (get-bytevector-all
+                      (make-zlib-input-port
+                       (open-bytevector-input-port (get))))))
+          (pk 'sizes size 'vs (bytevector-length data2))
+          (bytevector=? data2 data))))))
+
+(for-each (lambda (n)
+            (for-each (lambda (level)
+                        (test-zlib n level))
+                      (iota 9 1)))
+          (list (expt 2 8) (expt 2 10) (expt 2 12)
+                (expt 2 14) (expt 2 18)))
 
 (test-end)

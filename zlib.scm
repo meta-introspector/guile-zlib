@@ -1,5 +1,5 @@
 ;;; Guile-zlib --- GNU Guile bindings of zlib
-;;; Copyright © 2016, 2017 Ludovic Courtès <ludo@gnu.org>
+;;; Copyright © 2016, 2017, 2021 Ludovic Courtès <ludo@gnu.org>
 ;;; Copyright © 2020 Mathieu Othacehe <othacehe@gnu.org>
 ;;; Copyright © 2013 David Thompson <dthompson2@worcester.edu>
 ;;;
@@ -25,16 +25,21 @@
   #:use-module (ice-9 match)
   #:use-module (system foreign)
   #:use-module (ice-9 receive)
+  #:use-module (srfi srfi-1)
   #:export (make-gzip-input-port
             make-gzip-output-port
             call-with-gzip-input-port
             call-with-gzip-output-port
             %default-buffer-size
             %default-compression-level
+
             compress
             uncompress
             adler32
-            crc32))
+            crc32
+
+            make-zlib-input-port
+            make-zlib-output-port))
 
 ;;; Commentary:
 ;;;
@@ -407,5 +412,296 @@ the uncompressed data."
 (define* (crc32 bv #:optional (value %default-crc32))
   "Computes crc32 checksum with optional starting value."
   (%crc32 value (bytevector->pointer bv) (bytevector-length bv)))
+
+
+;;;
+;;; Low-level zlib stream API.
+;;;
+
+(define %zlib-version
+  ;; Library version that we're targeting.
+  "1.2.11")
+
+;; struct zstream
+(define %stream-struct
+  (list '*                                        ;next_in
+        unsigned-int                              ;avail_in
+        unsigned-long                             ;total_in
+
+        '*                                        ;next_out
+        unsigned-int                              ;avail_out
+        unsigned-long                             ;total_out
+
+        '*                                        ;msg
+        '*                                        ;state
+
+        '*                                        ;zalloc
+        '*                                        ;zfree
+        '*                                        ;opaque
+
+        int                                       ;data_type
+
+        unsigned-long                             ;adler
+        unsigned-long))                           ;reserved
+
+(define (offset-of types n)
+  "Return the offset of the Nth field among TYPES, the list of types of a
+struct's fields."
+  (if (zero? n)
+      0
+      (let* ((base  (sizeof (take types n)))
+             (align (alignof (list-ref types n)))
+             (mod   (modulo base align)))
+        (if (zero? mod)
+            base
+            (+ base (- align mod))))))
+
+(define-syntax-rule (define-stream-getter name index)
+  "Define NAME as a procedure accessing the INDEXth field of %STREAM-STRUCT."
+  (define name
+    (let* ((offset (offset-of %stream-struct index))
+           (type   (list-ref %stream-struct index))
+           (size   (sizeof type)))
+      (lambda (stream)
+        (bytevector-uint-ref stream offset (native-endianness)
+                             size)))))
+
+(define-syntax-rule (define-stream-setter name index)
+  "Define NAME as a procedure setting the INDEXth field of %STREAM-STRUCT."
+  (define name
+    (let* ((offset (offset-of %stream-struct index))
+           (type   (list-ref %stream-struct index))
+           (size   (sizeof type)))
+      (lambda (stream value)
+        (bytevector-uint-set! stream offset value
+                              (native-endianness) size)))))
+
+(define-stream-getter stream-avail-in 1)
+(define-stream-getter stream-avail-out 4)
+(define-stream-getter stream-error-message 6)
+(define-stream-setter set-stream-next-in! 0)
+(define-stream-setter set-stream-avail-in! 1)
+(define-stream-setter set-stream-next-out! 3)
+(define-stream-setter set-stream-avail-out! 4)
+
+(define (stream-error-message* stream)
+  "Return the error message associated with STREAM or #f."
+  (match (stream-error-message stream)
+    ((? zero?) #f)
+    (address   (pointer->string (make-pointer address)))))
+
+(define inflate!
+  (let ((proc (zlib-procedure int "inflate" `(* ,int))))
+    (lambda (stream flush)
+      (proc stream flush))))
+
+(define deflate!
+  (let ((proc (zlib-procedure int "deflate" `(* ,int))))
+    (lambda (stream flush)
+      (proc stream flush))))
+
+(define inflate-init!
+  (let ((proc (zlib-procedure int "inflateInit_" `(* * ,int))))
+    (lambda (stream)
+      (let ((ret (proc stream
+                       (string->pointer %zlib-version)
+                       (sizeof %stream-struct))))
+        (unless (zero? ret)
+          (throw 'zlib-error 'inflate-init! ret))))))
+
+(define deflate-init!
+  (let ((proc (zlib-procedure int "deflateInit_" `(* ,int * ,int))))
+    (lambda (stream level)
+      (let ((ret (proc stream level
+                       (string->pointer %zlib-version)
+                       (sizeof %stream-struct))))
+        (unless (zero? ret)
+          (throw 'zlib-error 'deflate-init! ret))))))
+
+(define inflate-end!
+  (let ((proc (zlib-procedure int "inflateEnd" '(*))))
+    (lambda (stream)
+      (let ((ret (proc stream)))
+        (unless (zero? ret)
+          (throw 'zlib-error 'inflate-end! ret))))))
+
+(define deflate-end!
+  (let ((proc (zlib-procedure int "deflateEnd" '(*))))
+    (lambda (stream)
+      (let ((ret (proc stream)))
+        (unless (zero? ret)
+          (throw 'zlib-error 'deflate-end! ret))))))
+
+;; Error codes.
+(define Z_OK 0)
+(define Z_STREAM_END 1)
+(define Z_NEED_DICT 2)
+(define Z_ERRNO -1)
+(define Z_STREAM_ERROR -2)
+(define Z_DATA_ERROR -3)
+(define Z_MEM_ERROR -4)
+(define Z_BUF_ERROR -5)
+
+;; Flush flags.
+(define Z_NO_FLUSH 0)
+(define Z_PARTIAL_FLUSH 1)
+(define Z_SYNC_FLUSH 2)
+(define Z_FULL_FLUSH 3)
+(define Z_FINISH 4)
+
+
+(define* (make-zlib-input-port port
+                               #:key
+                               (buffer-size %default-buffer-size)
+                               (close? #t))
+  "Return an input port that decompresses data read from PORT.
+When CLOSE? is true, PORT is automatically closed when the resulting port is
+closed."
+  (define input-buffer (make-bytevector buffer-size))
+
+  ;; Instead of writing uncompressed data directly to the user-provided
+  ;; buffer, keep a large-enough buffer.  That way, we know we cannot stumble
+  ;; into Z_BUF_ERROR because of insufficient output space.
+  (define output-buffer (make-bytevector %default-buffer-size))
+  (define buffered 0)
+  (define offset 0)
+
+  (define eof? #f)
+
+  (define stream (make-bytevector (sizeof %stream-struct)))
+  (define pointer
+    (let ((ptr (bytevector->pointer stream)))
+      (lambda (bv)
+        (if (eq? bv stream)
+            ptr
+            (bytevector->pointer bv)))))
+
+  (define (read! bv start count)
+    (cond ((> buffered 0)
+           (let ((n (min count buffered)))
+             (bytevector-copy! output-buffer offset bv start n)
+             (set! buffered (- buffered n))
+             (set! offset (+ offset n))
+             n))
+          (eof? 0)
+          (else
+           (set! offset 0)
+           (set-stream-next-out! stream
+                                 (pointer-address
+                                  (bytevector->pointer output-buffer)))
+           (set-stream-avail-out! stream (bytevector-length output-buffer))
+
+           (let loop ((ret Z_OK)
+                      (flush? #f))
+             (if (and (not flush?)
+                      (or (zero? (stream-avail-in stream))
+                          (= Z_BUF_ERROR ret)))
+                 (let ((n (get-bytevector-n! port input-buffer
+                                             0 buffer-size)))
+                   (if (eof-object? n)
+                       (loop ret #t)
+                       (begin
+                         (set-stream-next-in! stream
+                                              (pointer-address
+                                               (bytevector->pointer input-buffer)))
+                         (set-stream-avail-in! stream n)
+                         (loop ret flush?))))
+
+                 (let ((ret (inflate! (pointer stream)
+                                      (if flush? Z_SYNC_FLUSH 0))))
+                   (set! buffered (- (bytevector-length output-buffer)
+                                     (stream-avail-out stream)))
+                   (cond ((= ret Z_OK)
+                          (read! bv start count))
+                         ((= ret Z_STREAM_END)
+                          (set! eof? #t)
+                          (read! bv start count))
+                         ((and (not flush?) (= Z_BUF_ERROR ret))
+                          (loop ret flush?))
+                         (else
+                          (throw 'zlib-error ret
+                                 (stream-error-message* stream))))))))))
+
+  (define result
+    (make-custom-binary-input-port "zlib-input" read! #f #f
+                                   (lambda ()
+                                     (inflate-end! (pointer stream))
+                                     (when close?
+                                       (close-port port)))))
+
+  ;; No need for extra buffering.
+  (setvbuf result 'none)
+
+  (inflate-init! (pointer stream))
+  (set-stream-avail-in! stream 0)
+  result)
+
+(define* (make-zlib-output-port port
+                                #:key
+                                (buffer-size %default-buffer-size)
+                                (level %default-compression-level)
+                                (close? #t))
+  "Return an output port that compresses data at the given LEVEL, using PORT
+as its sink.  When CLOSE? is true, PORT is automatically closed when the
+resulting port is closed."
+  (define output-buffer (make-bytevector buffer-size))
+  (define stream (make-bytevector (sizeof %stream-struct)))
+
+  (define pointer
+    (let ((ptr (bytevector->pointer stream)))
+      (lambda (bv)
+        (if (eq? bv stream)
+            ptr
+            (bytevector->pointer bv)))))
+
+  (define (output-compressed-data! stream)
+    (put-bytevector port output-buffer 0
+                    (- buffer-size (stream-avail-out stream)))
+    (set-stream-avail-out! stream buffer-size)
+    (set-stream-next-out! stream
+                          (pointer-address
+                           (bytevector->pointer output-buffer))))
+
+  (define* (write! bv start count #:optional flush?)
+    (set-stream-next-in! stream (+ start (pointer-address
+                                          (bytevector->pointer bv))))
+    (set-stream-avail-in! stream count)
+
+    (let loop ()
+      (if (zero? (stream-avail-out stream))
+          (begin
+            (output-compressed-data! stream)
+            (loop))
+          (let ((ret (deflate! (pointer stream)
+                       (if flush? Z_FINISH Z_NO_FLUSH))))
+            (cond ((= ret Z_BUF_ERROR)
+                   (loop))
+                  ((= ret Z_OK)
+                   (match (- count (stream-avail-in stream))
+                     (0 (loop))                   ;zero would mean EOF
+                     (n n)))
+                  ((and flush? (= ret Z_STREAM_END))
+                   (- count (stream-avail-in stream)))
+                  (else
+                   (throw 'zlib-error 'deflate! ret
+                          (stream-error-message* stream))))))))
+
+  (define (flush)
+    (write! #vu8() 0 0 #t)
+    (output-compressed-data! stream))
+
+  (define (close)
+    (flush)
+    (deflate-end! (pointer stream))
+    (when close?
+      (close-port port)))
+
+  (deflate-init! (pointer stream) level)
+
+  (set-stream-avail-out! stream buffer-size)
+  (set-stream-next-out! stream
+                        (pointer-address (bytevector->pointer output-buffer)))
+
+  (make-custom-binary-output-port "zlib-output" write! #f #f close))
 
 ;;; zlib.scm ends here
