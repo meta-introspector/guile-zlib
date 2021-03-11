@@ -1,6 +1,7 @@
 ;;; Guile-zlib --- GNU Guile bindings of zlib
 ;;; Copyright © 2016, 2017 Ludovic Courtès <ludo@gnu.org>
 ;;; Copyright © 2020 Mathieu Othacehe <othacehe@gnu.org>
+;;; Copyright © 2013 David Thompson <dthompson2@worcester.edu>
 ;;;
 ;;; This file is part of Guile-zlib.
 ;;;
