@@ -662,7 +662,9 @@ closed."
                                        (close-port port)))))
 
   ;; No need for extra buffering.
-  (setvbuf result 'none)
+  (cond-expand ((or guile-2.2 guile-3.0)
+                (setvbuf result 'none))
+               (else #t))                         ;not possible on 2.0
 
   (inflate-init! (pointer stream)
                  (window-bits-for-format format))
