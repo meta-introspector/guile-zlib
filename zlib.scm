@@ -500,19 +500,33 @@ struct's fields."
     (lambda (stream flush)
       (proc stream flush))))
 
+(define (window-bits-for-format format)
+  ;; Search for "windowBits" in <zlib.h>.
+  (define MAX_WBITS 15)                           ;<zconf.h>
+  (match format
+    ('deflate (- MAX_WBITS))                      ;raw deflate
+    ('zlib    MAX_WBITS)                          ;zlib header
+    ('gzip    (+ MAX_WBITS 16))))                 ;gzip header
+
 (define inflate-init!
-  (let ((proc (zlib-procedure int "inflateInit_" `(* * ,int))))
-    (lambda (stream)
-      (let ((ret (proc stream
+  (let ((proc (zlib-procedure int "inflateInit2_" `(* ,int * ,int))))
+    (lambda (stream window-bits)
+      (let ((ret (proc stream window-bits
                        (string->pointer %zlib-version)
                        (sizeof %stream-struct))))
         (unless (zero? ret)
           (throw 'zlib-error 'inflate-init! ret))))))
 
 (define deflate-init!
-  (let ((proc (zlib-procedure int "deflateInit_" `(* ,int * ,int))))
-    (lambda (stream level)
-      (let ((ret (proc stream level
+  (let ((proc (zlib-procedure int "deflateInit2_" `(* ,int ,int ,int ,int
+                                                      ,int * ,int))))
+    (lambda* (stream level
+                     #:key
+                     (window-bits (window-bits-for-format 'zlib))
+                     (memory-level 8)
+                     (strategy Z_DEFAULT_STRATEGY))
+      (let ((ret (proc stream level Z_DEFLATED
+                       window-bits memory-level strategy
                        (string->pointer %zlib-version)
                        (sizeof %stream-struct))))
         (unless (zero? ret)
@@ -549,12 +563,19 @@ struct's fields."
 (define Z_FULL_FLUSH 3)
 (define Z_FINISH 4)
 
+;; 'deflate-init!' flags.
+(define Z_DEFLATED 8)
+(define Z_DEFAULT_STRATEGY 0)
 
 (define* (make-zlib-input-port port
                                #:key
+                               (format 'zlib)
                                (buffer-size %default-buffer-size)
                                (close? #t))
-  "Return an input port that decompresses data read from PORT.
+  "Return an input port that decompresses data read from PORT.  FORMAT is a
+symbol denoting the header format; it must be one of 'deflate (RFC 1950),
+'zlib (RFC 1951), or 'gzip (RFC 1952).
+
 When CLOSE? is true, PORT is automatically closed when the resulting port is
 closed."
   (define input-buffer (make-bytevector buffer-size))
@@ -632,18 +653,26 @@ closed."
   ;; No need for extra buffering.
   (setvbuf result 'none)
 
-  (inflate-init! (pointer stream))
+  (inflate-init! (pointer stream)
+                 (window-bits-for-format format))
   (set-stream-avail-in! stream 0)
   result)
 
 (define* (make-zlib-output-port port
                                 #:key
+                                (format 'zlib)
                                 (buffer-size %default-buffer-size)
                                 (level %default-compression-level)
                                 (close? #t))
   "Return an output port that compresses data at the given LEVEL, using PORT
-as its sink.  When CLOSE? is true, PORT is automatically closed when the
-resulting port is closed."
+as its sink.  FORMAT is a symbol denoting the header format; it must be one
+of 'deflate (RFC 1950), 'zlib (RFC 1951), or 'gzip (RFC 1952).
+
+When FORMAT is 'gzip, the gzip header takes default values, and in particular
+no modification time and no file name.
+
+When CLOSE? is true, PORT is automatically closed when the resulting port is
+closed."
   (define output-buffer (make-bytevector buffer-size))
   (define stream (make-bytevector (sizeof %stream-struct)))
 
@@ -696,7 +725,8 @@ resulting port is closed."
     (when close?
       (close-port port)))
 
-  (deflate-init! (pointer stream) level)
+  (deflate-init! (pointer stream) level
+    #:window-bits (window-bits-for-format format))
 
   (set-stream-avail-out! stream buffer-size)
   (set-stream-next-out! stream

@@ -80,26 +80,32 @@
          (ucdata (uncompress cdata)))
     (equal? data ucdata)))
 
-(define (test-zlib n level)
-  (test-assert (format #f "zlib ports [size: ~a, level: ~a]" n level)
+(define (test-zlib n fmt level)
+  (test-assert (format #f "zlib ports [size: ~a, format: ~a, level: ~a]"
+                       n fmt level)
     (let* ((size (pk 'size (+ (random n %seed) n)))
            (data (random-bytevector size)))
       (let*-values (((port get)
                      (open-bytevector-output-port))
                     ((compressed)
-                     (make-zlib-output-port port #:level level)))
+                     (make-zlib-output-port port
+                                            #:level level
+                                            #:format fmt)))
         (put-bytevector compressed data)
         (close-port compressed)
         (let ((data2 (get-bytevector-all
                       (make-zlib-input-port
-                       (open-bytevector-input-port (get))))))
+                       (open-bytevector-input-port (get))
+                       #:format fmt))))
           (pk 'sizes size 'vs (bytevector-length data2))
           (bytevector=? data2 data))))))
 
 (for-each (lambda (n)
-            (for-each (lambda (level)
-                        (test-zlib n level))
-                      (iota 9 1)))
+            (for-each (lambda (format)
+                        (for-each (lambda (level)
+                                    (test-zlib n format level))
+                                  (iota 9 1)))
+                      '(deflate zlib gzip)))
           (list (expt 2 8) (expt 2 10) (expt 2 12)
                 (expt 2 14) (expt 2 18)))
 
