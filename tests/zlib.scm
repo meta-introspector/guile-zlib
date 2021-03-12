@@ -18,6 +18,7 @@
 
 (define-module (test-zlib)
   #:use-module (zlib)
+  #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-11)
   #:use-module (srfi srfi-64)
   #:use-module (rnrs bytevectors)
