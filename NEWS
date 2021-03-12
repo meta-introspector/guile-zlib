@@ -1,0 +1,28 @@
+                                                              -*- org -*-
+#+TITLE: Guile-zlib NEWS – history of user-visible changes
+#+STARTUP: content hidestars
+
+Copyright © 2021 Ludovic Courtès <ludo@gnu.org>
+
+  Copying and distribution of this file, with or without modification,
+  are permitted in any medium without royalty provided the copyright
+  notice and this notice are preserved.
+
+Please report bugs at <https://notabug.org/guile-zlib/guile-zlib>.
+
+* Changes in 0.1.0 (compared to 0.0.1)
+
+** New procedures: ‘make-zlib-input-port’, ‘make-zlib-output-port’
+
+   These procedures and the companion ‘call-with-zlib-*’ procedures
+   provide an alternative to the ‘make-gzip-*’ and ‘call-with-gzip-*’
+   procedures; unlike those, they operate on all types of ports, not
+   just file ports.
+
+   These procedures also support multiple formats: raw “deflate”,
+   “zlib”, and “gzip”.
+
+** New ‘compress’ and ‘uncompress’ procedures
+
+   These procedures support compression/decompression of individual
+   bytevectors.
