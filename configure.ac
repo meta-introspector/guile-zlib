@@ -1,5 +1,5 @@
 AC_PREREQ([2.69])
-AC_INIT([Guile-zlib], [0.1], [guile-user@gnu.org], [guile-zlib],
+AC_INIT([Guile-zlib], [0.1.0], [guile-user@gnu.org], [guile-zlib],
   [https://notabug.org/guile-zlib/guile-zlib])
 
 AC_SUBST(HVERSION, "\"0.1\"")
