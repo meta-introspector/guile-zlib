@@ -353,7 +353,8 @@ require PORT to be a file port."
 ;; the returned data to. This procedure saves me a few keystrokes when
 ;; fetching that value.
 (define (buffer-length bv)
-  (bytevector-u64-native-ref bv 0))
+  (bytevector-uint-ref bv 0
+                       (native-endianness) (sizeof unsigned-long)))
 
 (define (uncompress bv)
   "Uncompresses bytevector and returns a bytevector containing
@@ -361,7 +362,8 @@ the uncompressed data."
   (define (try-uncompress length)
     (let* ((dest (make-bytevector (* (sizeof uint8) length)))
            (dest-length (make-bytevector (sizeof unsigned-long))))
-      (bytevector-u64-native-set! dest-length 0 length)
+      (bytevector-uint-set! dest-length 0 length
+                            (native-endianness) (sizeof unsigned-long))
       (values (%uncompress (bytevector->pointer dest)
                    (bytevector->pointer dest-length)
                    (bytevector->pointer bv)
@@ -399,7 +401,8 @@ the uncompressed data."
          (dest-bv        (make-bytevector dest-length))
          (dest-length-bv (make-bytevector (sizeof unsigned-long)))
          (ret-code       0))
-    (bytevector-u64-native-set! dest-length-bv 0 dest-length)
+    (bytevector-uint-set! dest-length-bv 0 dest-length
+                          (native-endianness) (sizeof unsigned-long))
     (set! ret-code
           (%compress (bytevector->pointer dest-bv)
                      (bytevector->pointer dest-length-bv)
