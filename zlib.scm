@@ -382,7 +382,7 @@ the uncompressed data."
     ;; I don't like the idea of a potentially unbounded loop that
     ;; keeps allocating larger and larger chunks of memory.
     (if (> tries 10)
-        (throw 'zlib-uncompress-error)
+        (throw 'zlib-error 'uncompress 0)
         (receive (ret-code uncompressed-data)
             (try-uncompress length)
           ;; return code -5 means that destination buffer was too small.
@@ -392,7 +392,7 @@ the uncompressed data."
                 ((= ret-code 0)
                  uncompressed-data)
                 (else
-                 (throw 'zlib-uncompress-error)))))))
+                 (throw 'zlib-error 'uncompress ret-code)))))))
 
 (define (compress bv)
   "Compresses bytevector and returns a bytevector containing the compressed data."
@@ -411,7 +411,7 @@ the uncompressed data."
     (if (= ret-code 0)
         (bytevector-copy-region dest-bv 0
                                 (buffer-length dest-length-bv))
-        (throw 'zlib-compress-error))))
+        (throw 'zlib-error 'compress ret-code))))
 
 (define %default-adler32 (%adler32 0 %null-pointer 0))
 (define %default-crc32   (%crc32   0 %null-pointer 0))
