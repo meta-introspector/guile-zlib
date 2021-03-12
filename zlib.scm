@@ -39,7 +39,9 @@
             crc32
 
             make-zlib-input-port
-            make-zlib-output-port))
+            make-zlib-output-port
+            call-with-zlib-input-port
+            call-with-zlib-output-port))
 
 ;;; Commentary:
 ;;;
@@ -193,8 +195,8 @@ buffered input, which would be lost (and is lost anyway)."
                                 (level %default-compression-level)
                                 (buffer-size %default-buffer-size))
   "Return an output port that compresses data at the given LEVEL, using PORT,
-a file port, as its sink.  PORT is automatically closed when the resulting
-port is closed."
+a file port, as its sink.  PORT must be a file port; it is automatically
+closed when the resulting port is closed."
   (define gzfile
     (begin
       (force-output port)                         ;empty PORT's buffer
@@ -215,8 +217,11 @@ port is closed."
 (define* (call-with-gzip-input-port port proc
                                     #:key (buffer-size %default-buffer-size))
   "Call PROC with a port that wraps PORT and decompresses data read from it.
-PORT is closed upon completion.  The gzip internal buffer size is set to
-BUFFER-SIZE bytes."
+PORT must be a file port; it is closed upon completion.  The gzip internal
+buffer size is set to BUFFER-SIZE bytes.
+
+See 'call-with-zlib-input-port' for a slightly slower variant that does not
+require PORT to be a file port."
   (let ((gzip (make-gzip-input-port port #:buffer-size buffer-size)))
     (dynamic-wind
       (const #t)
@@ -229,9 +234,12 @@ BUFFER-SIZE bytes."
                                      #:key
                                      (level %default-compression-level)
                                      (buffer-size %default-buffer-size))
-  "Call PROC with an output port that wraps PORT and compresses data.  PORT is
-close upon completion.  The gzip internal buffer size is set to BUFFER-SIZE
-bytes."
+  "Call PROC with an output port that wraps PORT and compresses data.  PORT
+must be a file port; it is closed upon completion.  The gzip internal buffer
+size is set to BUFFER-SIZE bytes.
+
+See 'call-with-zlib-output-port' for a slightly slower variant that does not
+require PORT to be a file port."
   (let ((gzip (make-gzip-output-port port
                                      #:level level
                                      #:buffer-size buffer-size)))
@@ -733,5 +741,43 @@ closed."
                         (pointer-address (bytevector->pointer output-buffer)))
 
   (make-custom-binary-output-port "zlib-output" write! #f #f close))
+
+(define* (call-with-zlib-input-port port proc
+                                    #:key
+                                    (format 'zlib)
+                                    (buffer-size %default-buffer-size))
+  "Call PROC with a port that wraps PORT and decompresses data read from it.
+PORT is closed upon completion.  The zlib internal buffer size is set to
+BUFFER-SIZE bytes."
+  (let ((zlib (make-zlib-input-port port
+                                    #:format format
+                                    #:buffer-size buffer-size
+                                    #:close? #t)))
+    (dynamic-wind
+      (const #t)
+      (lambda ()
+        (proc zlib))
+      (lambda ()
+        (close-port zlib)))))
+
+(define* (call-with-zlib-output-port port proc
+                                     #:key
+                                     (format 'zlib)
+                                     (level %default-compression-level)
+                                     (buffer-size %default-buffer-size))
+  "Call PROC with an output port that wraps PORT and compresses data in the
+given FORMAT, with the given LEVEL.  PORT is closed upon completion.  The
+zlib internal buffer size is set to BUFFER-SIZE bytes."
+  (let ((zlib (make-zlib-output-port port
+                                     #:format format
+                                     #:level level
+                                     #:buffer-size buffer-size
+                                     #:close? #t)))
+    (dynamic-wind
+      (const #t)
+      (lambda ()
+        (proc zlib))
+      (lambda ()
+        (close-port zlib)))))
 
 ;;; zlib.scm ends here
