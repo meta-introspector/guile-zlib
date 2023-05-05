@@ -157,11 +157,12 @@ the number of uncompressed bytes written, a strictly positive integer."
   -1)
 
 (define* (make-gzip-input-port port #:key (buffer-size %default-buffer-size))
-  "Return an input port that decompresses data read from PORT, a file port.
-PORT is automatically closed when the resulting port is closed.  BUFFER-SIZE
-is the size in bytes of the internal buffer, 8 KiB by default; using a larger
-buffer increases decompression speed.  An error is thrown if PORT contains
-buffered input, which would be lost (and is lost anyway)."
+  "Return an input port that decompresses data read from PORT, a file port.  The
+new port inherits the encoding of PORT.  PORT is automatically closed when the
+resulting port is closed.  BUFFER-SIZE is the size in bytes of the internal
+buffer, 8 KiB by default; using a larger buffer increases decompression speed.
+An error is thrown if PORT contains buffered input, which would be lost (and is
+lost anyway)."
   (define gzfile
     (match (drain-input port)
       (""                                         ;PORT's buffer is empty
@@ -183,21 +184,26 @@ buffered input, which would be lost (and is lost anyway)."
   (define (read! bv start count)
     (gzread! gzfile bv start count))
 
+  (define encoding (port-encoding port))
+
   (unless (= buffer-size %default-buffer-size)
     (gzbuffer! gzfile buffer-size))
 
   (close-port port)                               ;we no longer need it
-  (make-custom-binary-input-port "gzip-input" read! #f #f
-                                 (lambda ()
-                                   (gzclose gzfile))))
+
+  (let ((result (make-custom-binary-input-port "gzip-input" read! #f #f
+                                               (lambda () (gzclose gzfile)))))
+    (set-port-encoding! result encoding)
+    result))
+
 
 (define* (make-gzip-output-port port
                                 #:key
                                 (level %default-compression-level)
                                 (buffer-size %default-buffer-size))
-  "Return an output port that compresses data at the given LEVEL, using PORT,
-a file port, as its sink.  PORT must be a file port; it is automatically
-closed when the resulting port is closed."
+  "Return an output port that compresses data at the given LEVEL, using PORT, a
+file port, as its sink.  PORT must be a file port; it is automatically closed
+when the resulting port is closed.  The new port inherits the encoding of PORT."
   (define gzfile
     (begin
       (force-output port)                         ;empty PORT's buffer
@@ -207,19 +213,23 @@ closed when the resulting port is closed."
   (define (write! bv start count)
     (gzwrite gzfile bv start count))
 
+  (define encoding (port-encoding port))
+
   (unless (= buffer-size %default-buffer-size)
     (gzbuffer! gzfile buffer-size))
 
   (close-port port)
-  (make-custom-binary-output-port "gzip-output" write! #f #f
-                                  (lambda ()
-                                    (gzclose gzfile))))
+  (let ((result (make-custom-binary-output-port "gzip-output" write! #f #f
+                                                (lambda () (gzclose gzfile)))))
+    (set-port-encoding! result encoding)
+    result))
 
 (define* (call-with-gzip-input-port port proc
                                     #:key (buffer-size %default-buffer-size))
   "Call PROC with a port that wraps PORT and decompresses data read from it.
-PORT must be a file port; it is closed upon completion.  The gzip internal
-buffer size is set to BUFFER-SIZE bytes.
+PORT must be a file port; it is closed upon completion.  The new port inherits
+the encoding of PORT.  The gzip internal buffer size is set to BUFFER-SIZE
+bytes.
 
 See 'call-with-zlib-input-port' for a slightly slower variant that does not
 require PORT to be a file port."
@@ -235,9 +245,9 @@ require PORT to be a file port."
                                      #:key
                                      (level %default-compression-level)
                                      (buffer-size %default-buffer-size))
-  "Call PROC with an output port that wraps PORT and compresses data.  PORT
-must be a file port; it is closed upon completion.  The gzip internal buffer
-size is set to BUFFER-SIZE bytes.
+  "Call PROC with an output port that wraps PORT and compresses data.  PORT must
+be a file port; it is closed upon completion.  The new port inherits the
+encoding of PORT.  The gzip internal buffer size is set to BUFFER-SIZE bytes.
 
 See 'call-with-zlib-output-port' for a slightly slower variant that does not
 require PORT to be a file port."
@@ -598,8 +608,8 @@ struct's fields."
                                (buffer-size %default-buffer-size)
                                (close? #t))
   "Return an input port that decompresses data read from PORT.  FORMAT is a
-symbol denoting the header format; it must be one of 'deflate (RFC 1950),
-'zlib (RFC 1951), or 'gzip (RFC 1952).
+symbol denoting the header format; it must be one of 'deflate (RFC 1950), 'zlib
+(RFC 1951), or 'gzip (RFC 1952).  The new port inherits the encoding of PORT.
 
 When CLOSE? is true, PORT is automatically closed when the resulting port is
 closed."
@@ -668,6 +678,8 @@ closed."
                           (throw 'zlib-error ret
                                  (stream-error-message* stream))))))))))
 
+  (define encoding (port-encoding port))
+
   (define result
     (make-custom-binary-input-port "zlib-input" read! #f #f
                                    (lambda ()
@@ -683,6 +695,7 @@ closed."
   (inflate-init! (pointer stream)
                  (window-bits-for-format format))
   (set-stream-avail-in! stream 0)
+  (set-port-encoding! result encoding)
   result)
 
 (define* (make-zlib-output-port port
@@ -691,9 +704,10 @@ closed."
                                 (buffer-size %default-buffer-size)
                                 (level %default-compression-level)
                                 (close? #t))
-  "Return an output port that compresses data at the given LEVEL, using PORT
-as its sink.  FORMAT is a symbol denoting the header format; it must be one
-of 'deflate (RFC 1950), 'zlib (RFC 1951), or 'gzip (RFC 1952).
+  "Return an output port that compresses data at the given LEVEL, using PORT as
+its sink.  FORMAT is a symbol denoting the header format; it must be one of
+'deflate (RFC 1950), 'zlib (RFC 1951), or 'gzip (RFC 1952).  The new port
+inherits the encoding of PORT.
 
 When FORMAT is 'gzip, the gzip header takes default values, and in particular
 no modification time and no file name.
@@ -752,6 +766,8 @@ closed."
     (when close?
       (close-port port)))
 
+  (define encoding (port-encoding port))
+
   (deflate-init! (pointer stream) level
     #:window-bits (window-bits-for-format format))
 
@@ -759,7 +775,9 @@ closed."
   (set-stream-next-out! stream
                         (pointer-address (bytevector->pointer output-buffer)))
 
-  (make-custom-binary-output-port "zlib-output" write! #f #f close))
+  (let ((result (make-custom-binary-output-port "zlib-output" write! #f #f close)))
+    (set-port-encoding! result encoding)
+    result))
 
 (define* (call-with-zlib-input-port port proc
                                     #:key

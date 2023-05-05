@@ -1,3 +1,4 @@
+;;; -*- mode: scheme; coding: utf-8; -*-
 ;;; Guile-zlib --- Functional package management for GNU
 ;;; Copyright © 2016, 2019, 2021 Ludovic Courtès <ludo@gnu.org>
 ;;; Copyright © 2023 Artyom V. Poptsov <poptsov.artyom@gmail.com>
@@ -22,6 +23,8 @@
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-11)
   #:use-module (srfi srfi-64)
+  #:use-module (srfi srfi-26)
+  #:use-module (ice-9 binary-ports)
   #:use-module (rnrs bytevectors)
   #:use-module (rnrs io ports)
   #:use-module (ice-9 match))
@@ -46,6 +49,27 @@
             (bytevector-u8-set! bv i (random 256 %seed))
             (loop (1+ i)))
           bv))))
+
+(let ((str "αβγ"))
+  (test-equal
+    str
+    (let ((bv (call-with-output-bytevector
+               (lambda (o)
+; has to be set because call-with-output-bytevector ignores %default-port-encoding.
+                 (set-port-encoding! o "UTF-8")
+                 (call-with-zlib-output-port
+                  o
+                  (lambda (o)
+; force encoding here to reveal a mismatch on read.
+                    (set-port-encoding! o "UTF-8")
+                    (write str o)))))))
+      (with-fluids ((%default-port-encoding "UTF-8"))
+        (call-with-input-bytevector
+         bv
+         (lambda (o)
+; has to be set because call-with-input-bytevector ignores %default-port-encoding; see above.
+           (set-port-encoding! o "UTF-8")
+           (call-with-zlib-input-port o read)))))))
 
 (test-assert "compression/decompression pipe"
   (let ((data (random-bytevector (+ (random 10000)
