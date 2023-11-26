@@ -2,6 +2,7 @@
 ;;; Copyright © 2016, 2017, 2021 Ludovic Courtès <ludo@gnu.org>
 ;;; Copyright © 2020 Mathieu Othacehe <othacehe@gnu.org>
 ;;; Copyright © 2013 David Thompson <dthompson2@worcester.edu>
+;;; Copyright © 2023 Artyom V. Poptsov <poptsov.artyom@gmail.com>
 ;;;
 ;;; This file is part of Guile-zlib.
 ;;;
@@ -373,11 +374,15 @@ the uncompressed data."
   ;; We don't know how much space we need to store the uncompressed
   ;; data. So, we make an initial guess and keep increasing buffer
   ;; size until it works.
-  (define (step-buffer-length length)
-    (inexact->exact (round (* length 1.5))))
+  (define (step-buffer-length length step)
+    (inexact->exact (round (* length step))))
+
+  (define %start-step 1.5)
 
   (let try-again ((tries 1)
-                  (length (step-buffer-length (bytevector-length bv))))
+                  (step %start-step)
+                  (length (step-buffer-length (bytevector-length bv)
+                                              %start-step)))
     ;; Bail after so many failed attempts. This shouldn't happen, but
     ;; I don't like the idea of a potentially unbounded loop that
     ;; keeps allocating larger and larger chunks of memory.
@@ -388,7 +393,9 @@ the uncompressed data."
           ;; return code -5 means that destination buffer was too small.
           ;; return code  0 means everything went OK.
           (cond ((= ret-code -5)
-                 (try-again (1+ tries) (step-buffer-length length)))
+                 (try-again (1+ tries)
+                            (* step 2)
+                            (step-buffer-length length step)))
                 ((= ret-code 0)
                  uncompressed-data)
                 (else
