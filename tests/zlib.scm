@@ -1,5 +1,6 @@
 ;;; Guile-zlib --- Functional package management for GNU
 ;;; Copyright © 2016, 2019, 2021 Ludovic Courtès <ludo@gnu.org>
+;;; Copyright © 2023 Artyom V. Poptsov <poptsov.artyom@gmail.com>
 ;;;
 ;;; This file is part of Guile-zlib.
 ;;;
@@ -109,5 +110,17 @@
                       '(deflate zlib gzip)))
           (list (expt 2 8) (expt 2 10) (expt 2 12)
                 (expt 2 14) (expt 2 18)))
+
+;; This test checks if "uncompress" is able to allocate enough memory for the
+;; output when the input data has high compression ratio properly (e.g. when the
+;; input data is but a lots of compressed zeroes.)
+;;
+;; See <https://notabug.org/guile-zlib/guile-zlib/issues/4>
+(let* ((data        (make-bytevector 100000 0))
+       (data-length (bytevector-length data)))
+  (test-equal "uncompress: High compression ratio"
+    data-length
+    (let ((compressed-data (compress data)))
+      (bytevector-length (uncompress compressed-data)))))
 
 (test-end)
