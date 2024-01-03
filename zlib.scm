@@ -280,6 +280,15 @@ require PORT to be a file port."
 (define %uncompress
   (zlib-procedure int "uncompress" (list '* '* '* unsigned-long)))
 
+;; ZEXTERN int ZEXPORT uncompress2(Bytef *dest,   uLongf *destLen,
+;;                                 const Bytef *source, uLong *sourceLen);
+;;
+;; Same as uncompress, except that sourceLen is a pointer, where the length of
+;; the source is *sourceLen. On return, *sourceLen is the number of source bytes
+;; consumed.
+(define %uncompress2
+  (zlib-procedure int "uncompress2" (list '* '* '* '*)))
+
 ;;
 ;; ZEXTERN int ZEXPORT compress OF((Bytef *dest, uLongf *destLen,
 ;;                                  const Bytef *source, uLong sourceLen));
@@ -362,40 +371,38 @@ require PORT to be a file port."
 the uncompressed data."
   (define (try-uncompress length)
     (let* ((dest (make-bytevector (* (sizeof uint8) length)))
-           (dest-length (make-bytevector (sizeof unsigned-long))))
+           (dest-length (make-bytevector (sizeof unsigned-long)))
+           (source-length (make-bytevector (sizeof unsigned-long))))
+      (bytevector-u64-set! source-length 0 length (native-endianness))
       (bytevector-uint-set! dest-length 0 length
                             (native-endianness) (sizeof unsigned-long))
-      (values (%uncompress (bytevector->pointer dest)
-                   (bytevector->pointer dest-length)
-                   (bytevector->pointer bv)
-                   length)
-              (bytevector-copy-region dest 0 (buffer-length dest-length)))))
+      (let ((result (%uncompress2 (bytevector->pointer dest)
+                                  (bytevector->pointer dest-length)
+                                  (bytevector->pointer bv)
+                                  (bytevector->pointer source-length))))
+        (values result
+                (bytevector-copy-region dest 0 (buffer-length dest-length))
+                (buffer-length source-length)))))
 
-  ;; We don't know how much space we need to store the uncompressed
-  ;; data. So, we make an initial guess and keep increasing buffer
-  ;; size until it works.
-  (define (step-buffer-length length step)
-    (inexact->exact (round (* length step))))
-
-  (define %start-step 1.5)
-
-  (let try-again ((tries 1)
-                  (step %start-step)
-                  (length (step-buffer-length (bytevector-length bv)
-                                              %start-step)))
+  (let try-again ((tries  1)
+                  (length (inexact->exact (* (bytevector-length bv) 1.5))))
     ;; Bail after so many failed attempts. This shouldn't happen, but
     ;; I don't like the idea of a potentially unbounded loop that
     ;; keeps allocating larger and larger chunks of memory.
     (if (> tries 10)
         (throw 'zlib-error 'uncompress 0)
-        (receive (ret-code uncompressed-data)
+        (receive (ret-code uncompressed-data read-source-length)
             (try-uncompress length)
           ;; return code -5 means that destination buffer was too small.
           ;; return code  0 means everything went OK.
           (cond ((= ret-code -5)
-                 (try-again (1+ tries)
-                            (* step 2)
-                            (step-buffer-length length step)))
+                 (let* ((compressesed-data-size (bytevector-length bv))
+                        (percent                (* (/ read-source-length
+                                                      compressesed-data-size)
+                                                   100))
+                        (next-size (inexact->exact (round (/ (* 100 length)
+                                                             percent)))))
+                   (try-again (1+ tries) next-size)))
                 ((= ret-code 0)
                  uncompressed-data)
                 (else
