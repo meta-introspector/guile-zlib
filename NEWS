@@ -2,13 +2,26 @@
 #+TITLE: Guile-zlib NEWS – history of user-visible changes
 #+STARTUP: content hidestars
 
-Copyright © 2021 Ludovic Courtès <ludo@gnu.org>
+Copyright © 2021, 2024 Ludovic Courtès <ludo@gnu.org>
 
   Copying and distribution of this file, with or without modification,
   are permitted in any medium without royalty provided the copyright
   notice and this notice are preserved.
 
 Please report bugs at <https://notabug.org/guile-zlib/guile-zlib>.
+
+* Changes in 0.1.1 (compared to 0.1.0)
+
+** Improve heuristics of bytevector size calculation in ‘uncompress’
+
+   ‘uncompress’ now makes a better job at guessing the size of the
+   output bytevector.
+
+** ‘make-zlib-input-port’ & co. inherit the input port’s encoding
+
+   ‘make-gzip-input-port’, ‘make-gzip-output-port’,
+   ‘make-zlib-output-port’, and ‘make-zlib-input-port’ now inherit the
+   encoding of their input port.
 
 * Changes in 0.1.0 (compared to 0.0.1)
 
