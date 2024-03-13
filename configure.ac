@@ -8,6 +8,7 @@ AC_SUBST(COPYRIGHT, "'(2020)")
 AC_SUBST(LICENSE, gpl3+)
 AC_CONFIG_SRCDIR(zlib.scm)
 AC_CONFIG_AUX_DIR([build-aux])
+AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([1.12 gnu silent-rules subdir-objects  color-tests parallel-tests -Woverride -Wno-portability])
 AM_SILENT_RULES([yes])
 
